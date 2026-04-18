@@ -117,6 +117,10 @@ services:
       - "4433:443"
     container_name: ${SITE_LABEL}
     restart: always
+    extra_hosts:
+      # Forces the container to use domain name instead of the internal IP
+      # to prevent an unsecure SSL error with the embedded self-signed certs.
+      - "${DOMAIN}:host-gateway"
     links:
       - db
       - redis

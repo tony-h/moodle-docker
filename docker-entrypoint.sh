@@ -162,4 +162,36 @@ fi
 
 mkdir -p /var/www/moodledata && chown -R www-data:www-data /var/www/moodledata
 
+## Moodle 5.x+ security standards require the web root to be /public, 
+## so we need to check for that and adjust Apache configuration accordingly
+APACHE_CONF="/etc/apache2/sites-available/000-default.conf"
+
+# Enable required Apache modules
+a2enmod ssl > /dev/null
+a2enmod headers > /dev/null
+
+echo "[+] Checking Moodle directory structure..."
+
+if [ -d "/var/www/html/public" ]; then
+    echo "[+] Found /public directory. Configuring Apache for Moodle 5.x+ security."
+    # Use global replace to catch both *:80 and *:443 blocks
+    sed -i 's|/var/www/html/public|/var/www/html/public|g' "$APACHE_CONF"
+    sed -i 's|DocumentRoot /var/www/html$|DocumentRoot /var/www/html/public|g' "$APACHE_CONF"
+else
+    echo "[!] No /public directory found. Falling back to legacy root."
+    sed -i 's|/var/www/html/public|/var/www/html|g' "$APACHE_CONF"
+fi
+
+# Ensure Moodle config handles reverse proxy SSL correctly
+CONFIG_PHP="/var/www/html/config.php"
+if [ -f "$CONFIG_PHP" ]; then
+    if ! grep -q "sslproxy" "$CONFIG_PHP"; then
+        echo "[+] Injecting sslproxy setting into config.php..."
+        # Injects the setting before the require_once line
+        sed -i "/require_once/i \$CFG->sslproxy = true;" "$CONFIG_PHP"
+    fi
+fi
+
+a2ensite 000-default.conf > /dev/null
+
 exec "$@"

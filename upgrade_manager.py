@@ -58,7 +58,11 @@ def download_and_extract_moodle(branch, dest_dir):
         
     log(f"Extracting Moodle {branch}...")
     with tarfile.open(tar_path, "r:gz") as tar:
-        tar.extractall(path=TMP_DIR)
+        # Check for Python 3.12+ extraction filters to silence the warning
+        if hasattr(tarfile, 'data_filter'):
+            tar.extractall(path=TMP_DIR, filter='fully_trusted')
+        else:
+            tar.extractall(path=TMP_DIR)
         
     # Moodle extracts to a folder named 'moodle'
     extracted_dir = os.path.join(TMP_DIR, 'moodle')
