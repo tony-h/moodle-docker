@@ -1,1 +1,10 @@
+# Configs and logs
 .env
+*backup*
+logs
+supervisor
+
+# Moodle Docker specific
+db_data
+moodledata
+moodle

@@ -1,0 +1,49 @@
+services:
+  db:
+    image: mariadb:latest
+    restart: always
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW --skip-innodb-read-only-compressed
+    volumes:
+      - ./db_data:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+
+  moodle:
+    build:
+      context: ./build-context
+      dockerfile: Dockerfile
+    image: local/moodle-docker:latest
+    ports:
+      - "${WWW_PORT}:80"
+      - "${WWW_SSH_PORT}:443"
+    container_name: ${SITE_LABEL}
+    restart: always
+    extra_hosts:
+      # Forces the container to use domain name instead of the internal IP
+      # to prevent an unsecure SSL error with the embedded self-signed certs.
+      - "${SITE_LABEL}:host-gateway"
+    links:
+      - db
+      - redis
+    volumes:
+      - ./moodledata:/var/www/moodledata
+      - ./moodle:/var/www/html
+      - ./backups/courses:/var/www/course-backups
+      - ./logs:/var/log/apache2
+      - ./supervisor:/var/log/supervisor
+    environment:
+      MOODLE_DB_TYPE: mariadb
+      MOODLE_DB_HOST: db
+      MOODLE_DB_PORT: 3306
+      MOODLE_DB_NAME: ${MYSQL_DATABASE}
+      MOODLE_DB_USER: ${MYSQL_USER}
+      MOODLE_DB_PASSWORD: ${MYSQL_PASSWORD}
+      MOODLE_WWW_ROOT: https://${DOMAIN}
+      MOODLE_DATA_ROOT: /var/www/moodledata
+
+  redis:
+    image: redis:latest
+    restart: always
