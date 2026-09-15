@@ -23,7 +23,7 @@ file_env() {
   unset "$fileVar"
 }
 
-if [[ "$1" == apache2* ]]; then
+if [[ "$1" == apache2* ]] || [[ "$1" == /usr/bin/supervisord* ]]; then
   if ! [ -e "index.php" -a -e "version.php" ]; then
     echo >&2 "Moodle not found in $PWD - copying now..."
     if [ "$(ls -A)" ]; then
@@ -78,22 +78,16 @@ if [[ "$1" == apache2* ]]; then
     : "${MOODLE_WWW_ROOT:=}"
     : "${MOODLE_DATA_ROOT:=/var/www/moodledata}"
 
-
     if [ ! -e "config.php" ]; then
       mv config-dist.php config.php
       chown www-data:www-data config.php
     fi
 
     # see http://stackoverflow.com/a/2705678/433558
-    sed_escape_lhs() {
-      echo "$@" | sed -e 's/[]\/$*.^|[]/\\&/g'
-    }
-    sed_escape_rhs() {
-      echo "$@" | sed -e 's/[\/&]/\\&/g'
-    }
-    php_escape() {
-      php -r 'var_export(('$2') $argv[1]);' -- "$1"
-    }
+    sed_escape_lhs() { echo "$@" | sed -e 's/[]\/$*.^|[]/\\&/g'; }
+    sed_escape_rhs() { echo "$@" | sed -e 's/[\/&]/\\&/g'; }
+    php_escape() { php -r 'var_export(('$2') $argv[1]);' -- "$1"; }
+    
     set_config() {
       key="$1"
       value="$2"
@@ -123,6 +117,7 @@ if [[ "$1" == apache2* ]]; then
 // database might not exist, so let's try creating it (just to be safe)
 
 $stderr = fopen('php://stderr', 'w');
+mysqli_report(MYSQLI_REPORT_OFF); // Prevent fatal exceptions in PHP 8.1+
 
 $host = getenv('MOODLE_DB_HOST');
 $port = getenv('MOODLE_DB_PORT');
@@ -171,10 +166,8 @@ a2enmod ssl > /dev/null
 a2enmod headers > /dev/null
 
 echo "[+] Checking Moodle directory structure..."
-
 if [ -d "/var/www/html/public" ]; then
     echo "[+] Found /public directory. Configuring Apache for Moodle 5.x+ security."
-    # Use global replace to catch both *:80 and *:443 blocks
     sed -i 's|/var/www/html/public|/var/www/html/public|g' "$APACHE_CONF"
     sed -i 's|DocumentRoot /var/www/html$|DocumentRoot /var/www/html/public|g' "$APACHE_CONF"
 else
@@ -182,13 +175,32 @@ else
     sed -i 's|/var/www/html/public|/var/www/html|g' "$APACHE_CONF"
 fi
 
-# Ensure Moodle config handles reverse proxy SSL correctly
+# Ensure Moodle config handles reverse proxy SSL and Redis correctly
 CONFIG_PHP="/var/www/html/config.php"
 if [ -f "$CONFIG_PHP" ]; then
-    if ! grep -q "sslproxy" "$CONFIG_PHP"; then
-        echo "[+] Injecting sslproxy setting into config.php..."
-        # Injects the setting before the require_once line
+    # Stricter grep to avoid the commented // $CFG->sslproxy line
+    if ! grep -q "\$_SERVER\['HTTPS'\]" "$CONFIG_PHP"; then
+        echo "[+] Injecting HTTPS bypass settings into config.php..."
+        sed -i "/require_once/i \$_SERVER['HTTPS'] = 'on';" "$CONFIG_PHP"
+        sed -i "/require_once/i \$_SERVER['SERVER_PORT'] = 443;" "$CONFIG_PHP"
         sed -i "/require_once/i \$CFG->sslproxy = true;" "$CONFIG_PHP"
+    fi
+    
+    # Enable Moodle 5.x Routing
+    if grep -q "routerconfigured = false" "$CONFIG_PHP"; then
+        echo "[+] Enabling Moodle 5.x Router in config.php (replacing false)..."
+        sed -i "s/\$CFG->routerconfigured = false;/\$CFG->routerconfigured = true;/g" "$CONFIG_PHP"
+    elif ! grep -q "routerconfigured = true" "$CONFIG_PHP"; then
+        echo "[+] Injecting Router configuration into config.php..."
+        sed -i "/require_once/i \$CFG->routerconfigured = true;" "$CONFIG_PHP"
+    fi
+    
+    # Stricter grep to avoid the commented // $CFG->session_redis_host line
+    if ! grep -q "session_redis_host = 'redis'" "$CONFIG_PHP"; then
+        echo "[+] Injecting Redis session configuration into config.php..."
+        sed -i "/require_once/i \$CFG->session_handler_class = '\\\core\\\session\\\redis';" "$CONFIG_PHP"
+        sed -i "/require_once/i \$CFG->session_redis_host = 'redis';" "$CONFIG_PHP"
+        sed -i "/require_once/i \$CFG->session_redis_port = 6379;" "$CONFIG_PHP"
     fi
 fi
 

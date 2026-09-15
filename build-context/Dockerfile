@@ -30,7 +30,7 @@ RUN set -ex; \
     chmod ugo+x /opt/unoconv/unoconv; \
     ln -s /opt/unoconv/unoconv /usr/bin/unoconv; \
     \
-    # 2. Setup Locales (Much cleaner than multiple sed commands)
+    # 2. Setup Locales 
     echo "C.UTF-8 UTF-8\nde_DE.UTF-8 UTF-8\nen_US.UTF-8 UTF-8\nen_GB.UTF-8 UTF-8\nes_ES.UTF-8 UTF-8\nfr_FR.UTF-8 UTF-8\nko_KR.UTF-8 UTF-8\nky_KG UTF-8\nnl_NL.UTF-8 UTF-8\nru_RU.UTF-8 UTF-8\nzh_CN.UTF-8 UTF-8" > /etc/locale.gen; \
     locale-gen; \
     \
@@ -54,13 +54,18 @@ RUN a2enmod rewrite expires ssl && \
     -subj "/C=GB/ST=London/L=London/O=IT/CN=localhost"
 
 # --- Moodle Core ---
-ENV MOODLE_BRANCH=501
-ENV MOODLE_RELEASE=501
+# Use ARG so these can be overridden in docker-compose.yml by end-users
+ARG MOODLE_BRANCH=502
+ARG MOODLE_RELEASE=502
+ENV MOODLE_BRANCH=${MOODLE_BRANCH}
+ENV MOODLE_RELEASE=${MOODLE_RELEASE}
 
 RUN set -ex; \
     curl -o moodle.tgz -fSL "https://download.moodle.org/download.php/direct/stable${MOODLE_BRANCH}/moodle-latest-${MOODLE_RELEASE}.tgz"; \
     tar -xzf moodle.tgz -C /usr/src/; \
     rm moodle.tgz; \
+    cd /usr/src/moodle; \
+    COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --classmap-authoritative; \
     chown -R www-data:www-data /usr/src/moodle
 
 RUN mkdir -p /var/www/moodledata && \
@@ -68,12 +73,13 @@ RUN mkdir -p /var/www/moodledata && \
     chown -R www-data:www-data /var/www
 
 # --- Inject Custom Configurations ---
-# Copy Apache site configuration and ensure it's enabled
 COPY ./apache/site.conf /etc/apache2/sites-available/000-default.conf
 RUN a2ensite 000-default.conf
 
-# Copy PHP overrides
 COPY ./apache/php-overrides.ini /usr/local/etc/php/conf.d/php-overrides.ini
+
+# Enforce Moodle 5.1 security recommendation
+RUN echo "zend.exception_ignore_args = On" > /usr/local/etc/php/conf.d/moodle-security.ini
 
 # Copy Entrypoint and Supervisor Config
 COPY docker-entrypoint.sh /usr/local/bin/
@@ -88,5 +94,4 @@ RUN chmod +x /usr/local/bin/moodle-upgrade
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Change CMD to start supervisor instead of directly starting Apache
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

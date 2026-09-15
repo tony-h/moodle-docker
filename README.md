@@ -8,9 +8,9 @@ This repository provides a production-ready Docker deployment for **Moodle 5.x**
 The stack consists of four primary services:
 
 * **Moodle:** The application core running Apache and PHP 8.4, optimized with OPcache.
-* **MariaDB:** A relational database tuned for Moodle's `READ-COMMITTED` transaction isolation requirements.
+* **MariaDB:** A relational database pinned to version 12.3 and tuned for Moodle's `READ-COMMITTED` transaction isolation requirements.
 * **Redis:** High-speed in-memory data structure store used for Moodle's Universal Cache (MUC) and session handling.
-* **Tasks (Deck-chores):** A sidecar container that monitors Docker labels to execute the Moodle cron script without requiring a local system crontab.
+* **Tasks (Ofelia):** A sidecar container that securely executes the Moodle cron script by filtering Docker labels for this specific stack, keeping the cron architecture decentralized.
 
 ## Prerequisites
 
@@ -28,10 +28,6 @@ MYSQL_ROOT_PASSWORD=your_secure_root_password
 MYSQL_DATABASE=moodle
 MYSQL_USER=moodle_user
 MYSQL_PASSWORD=your_moodle_db_password
-
-# Ports
-WWW_PORT=8080
-WWW_SSH_PORT=4433
 
 # Site Identification
 SITE_LABEL=moodle-name
@@ -63,18 +59,19 @@ To ensure data persistence and ease of troubleshooting, the following host direc
     docker compose up --build -d
     ```
 
-## Automated Cron
+## Automated Configuration & Cron
 
-This stack uses `deck-chores` to manage Moodle's cron tasks. The configuration is handled via labels on the `moodle` service:
+This stack uses `ofelia` to manage Moodle's cron tasks securely without exposing the Docker socket to all containers. The configuration is handled via labels on the `moodle` service:
 
 * **Command:** `/usr/local/bin/php /var/www/html/admin/cli/cron.php`
-* **Interval:** Every 1 minute
+* **Interval:** Every 1 minute (`* * * * *`)
 
-This ensures that maintenance tasks (like sending forum emails or processing course completions) are handled reliably within the Docker environment.
+Additionally, the container's entrypoint script automatically detects the Redis container and injects the required `$CFG->session_handler_class` configurations directly into `config.php` upon startup.
 
-Optionally, use the host `crontab` instead:
+Optionally, use the host `crontab` instead to eliminate the Ofelia sidecar entirely:
+
 ```bash
-* * * * * docker exec <contain_name> php admin/cli/cron.php
+* * * * * docker exec -u www-data <container_name> php /var/www/html/admin/cli/cron.php
 ```
 
 ## The Upgrade Manager
@@ -83,9 +80,18 @@ This image includes a custom Python utility to manage major and minor Moodle upg
 
 ### Running an Upgrade
 
+The one-step upgrade option is to run `scripts/moodle_upgrade.sh`, which calls the Python upgrade manager.
+```bash
+sudo bash scripts/moodle_upgrade.sh <moodle_branch>
+```
+
+### Running an Upgrade via the Upgrade Manger
+
+Alternatively, run the upgrade step by step.
+
 1.  **Trigger the file migration:**
     ```bash
-    docker compose exec -it moodle moodle-upgrade 501
+    docker compose exec -it moodle moodle-upgrade 502
     ```
 
 2.  **Run the database upgrade:**
