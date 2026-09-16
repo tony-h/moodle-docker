@@ -52,6 +52,8 @@ services:
   redis:
     image: redis:latest
     restart: always
+    volumes:
+      - redis_data:/data # Assigns a named volume to prevent anonymous leakage
 
   ofelia:
     image: mcuadros/ofelia:latest
@@ -62,7 +64,16 @@ services:
     restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    logging: # Forces Docker to keep a maximum of 3 logs at 10MB each
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   gateway-net:
     external: true
+
+# Declare the named volume at the very bottom of the file
+volumes:
+  redis_data:
