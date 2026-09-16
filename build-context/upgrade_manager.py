@@ -27,10 +27,17 @@ def error_exit(msg):
     sys.exit(1)
 
 def get_current_branch():
-    version_file = os.path.join(LIVE_DIR, 'version.php')
-    if not os.path.exists(version_file):
-        error_exit(f"Cannot find {version_file}. Is Moodle installed?")
-    
+    # Check both Moodle 5.0 (legacy root) and Moodle 5.1+ (public/ directory)
+    legacy_version = os.path.join(LIVE_DIR, 'version.php')
+    modern_version = os.path.join(LIVE_DIR, 'public', 'version.php')
+
+    if os.path.exists(modern_version):
+        version_file = modern_version
+    elif os.path.exists(legacy_version):
+        version_file = legacy_version
+    else:
+        error_exit(f"Cannot find version.php in {LIVE_DIR} or {LIVE_DIR}/public. Is Moodle installed?")
+
     with open(version_file, 'r') as f:
         content = f.read()
         match = re.search(r"\$branch\s*=\s*'(\d+)'", content)

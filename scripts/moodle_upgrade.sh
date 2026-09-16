@@ -20,9 +20,28 @@ DB_BACKUP_DIR="${MOODLE_DIR}/backups/database"
 # Ensure backup directory exists
 mkdir -p "$DB_BACKUP_DIR"
 
+# Locate version.php handling both legacy and 5.1+ directory structures
+if [ -f "moodle/public/version.php" ]; then
+    VERSION_FILE="moodle/public/version.php"
+elif [ -f "moodle/version.php" ]; then
+    VERSION_FILE="moodle/version.php"
+else
+    VERSION_FILE=""
+fi
+
+# Extract the branch and release text using grep
+if [ -n "$VERSION_FILE" ]; then
+    CURRENT_BRANCH=$(grep -oP "branch\s*=\s*'\K[^']+" "$VERSION_FILE")
+    CURRENT_RELEASE=$(grep -oP "release\s*=\s*'\K[^']+" "$VERSION_FILE")
+else
+    CURRENT_BRANCH="Unknown"
+    CURRENT_RELEASE="Unknown"
+fi
+
 echo "#############################################"
-echo "Orchestrating Moodle Upgrade for $SITE"
-echo "Target Branch: $TARGET_BRANCH"
+echo "Orchestrating Moodle Upgrade for moodle-docker"
+echo "Current Branch: $CURRENT_BRANCH ($CURRENT_RELEASE)"
+echo "Target Branch:  $1"
 echo "#############################################"
 echo ""
 read -p  "Press 'y' to start the upgrade process: " -n 1 -r
