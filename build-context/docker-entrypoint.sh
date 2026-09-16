@@ -24,7 +24,7 @@ file_env() {
 }
 
 if [[ "$1" == apache2* ]] || [[ "$1" == /usr/bin/supervisord* ]]; then
-  if ! [ -e "index.php" -a -e "version.php" ]; then
+  if [[ ! -e "version.php" && ! -e "public/version.php" ]]; then
     echo >&2 "Moodle not found in $PWD - copying now..."
     if [ "$(ls -A)" ]; then
       echo >&2 "WARNING: $PWD is not empty - press Ctrl+C now if this is an error!"

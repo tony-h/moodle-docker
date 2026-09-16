@@ -74,6 +74,6 @@ networks:
   gateway-net:
     external: true
 
-# Declare the named volume at the very bottom of the file
+# Named volumes
 volumes:
   redis_data:
