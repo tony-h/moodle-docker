@@ -104,7 +104,14 @@ Alternatively, run the upgrade step by step.
     docker compose exec -u www-data moodle php admin/cli/purge_caches.php
     ```
 
-## Performance Tuning
+## Customizing Apache and PHP Configurations
 
-* **PHP Overrides:** Custom settings (Memory limits, OPcache, Max Input Vars) are baked into the image but can be reviewed in the `php-overrides.ini` file.
-* **Composer:** Moodle 5.1+ dependencies are managed via an authoritative classmap built during the container's lifecycle to minimize I/O overhead.
+This Docker image bakes in optimized Apache and PHP settings by default. However, if you need to make specific adjustments (like adding custom Apache aliases, altering rewrite rules, or changing PHP upload limits), you can hot-swap these files without rebuilding the image.
+
+1. **Locate the default files:** The default configurations are located in the `./build-context/apache/` directory of this repository.
+2. **Modify your local copy:** Edit `./build-context/apache/site.conf` or `php-overrides.ini` to suit your needs.
+3. **Uncomment the volume mounts:** Open your `docker-compose.yml` file and uncomment the Advanced Configuration Overrides under the `moodle` service:
+   ```yaml
+   # - ./build-context/apache/site.conf:/etc/apache2/sites-available/000-default.conf:ro
+   # - ./build-context/apache/php-overrides.ini:/usr/local/etc/php/conf.d/php-overrides.ini:ro
+   ```

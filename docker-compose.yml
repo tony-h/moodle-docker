@@ -31,6 +31,10 @@ services:
       - ./backups/courses:/var/www/course-backups
       - ./logs:/var/log/apache2
       - ./supervisor:/var/log/supervisor
+      # --- Advanced Configuration Overrides ---
+      # Uncomment the lines below to hot-swap Apache and PHP settings without rebuilding the image.
+      # - ./build-context/apache/site.conf:/etc/apache2/sites-available/000-default.conf:ro
+      # - ./build-context/apache/php-overrides.ini:/usr/local/etc/php/conf.d/php-overrides.in
     environment:
       MOODLE_DB_TYPE: mariadb
       MOODLE_DB_HOST: db

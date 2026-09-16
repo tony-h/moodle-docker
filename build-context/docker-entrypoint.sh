@@ -166,13 +166,20 @@ a2enmod ssl > /dev/null
 a2enmod headers > /dev/null
 
 echo "[+] Checking Moodle directory structure..."
-if [ -d "/var/www/html/public" ]; then
-    echo "[+] Found /public directory. Configuring Apache for Moodle 5.x+ security."
-    sed -i 's|/var/www/html/public|/var/www/html/public|g' "$APACHE_CONF"
-    sed -i 's|DocumentRoot /var/www/html$|DocumentRoot /var/www/html/public|g' "$APACHE_CONF"
+
+if [ -w "$APACHE_CONF" ]; then
+    if [ -d "/var/www/html/public" ]; then
+        echo "[+] Found /public directory. Configuring Apache for Moodle 5.x+ security."
+        sed 's|DocumentRoot /var/www/html$|DocumentRoot /var/www/html/public|g' "$APACHE_CONF" > /tmp/apache.tmp
+        cat /tmp/apache.tmp > "$APACHE_CONF"
+    else
+        echo "[!] No /public directory found. Falling back to legacy root."
+        sed 's|/var/www/html/public|/var/www/html|g' "$APACHE_CONF" > /tmp/apache.tmp
+        cat /tmp/apache.tmp > "$APACHE_CONF"
+    fi
+    rm -f /tmp/apache.tmp
 else
-    echo "[!] No /public directory found. Falling back to legacy root."
-    sed -i 's|/var/www/html/public|/var/www/html|g' "$APACHE_CONF"
+    echo "[+] Apache conf is read-only. Skipping dynamic path injection."
 fi
 
 # Ensure Moodle config handles reverse proxy SSL and Redis correctly
