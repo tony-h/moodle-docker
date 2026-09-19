@@ -53,6 +53,7 @@ services:
       MOODLE_CRON_KEEPALIVE: 0
     labels:
       - "ofelia.enabled=true"
+      - "scheduler=${SITE_LABEL}"
       - "ofelia.job-exec.moodlecron.schedule=@every 1m"
       - "ofelia.job-exec.moodlecron.command=/usr/local/bin/php /var/www/html/admin/cli/cron.php"
       - "ofelia.job-exec.moodlecron.user=www-data"
@@ -71,7 +72,10 @@ services:
     container_name: ${SITE_LABEL}-ofelia
     depends_on:
       - moodle
-    command: daemon --docker --docker-filter name=${SITE_LABEL}
+    command: >
+      daemon
+      --docker
+      --docker-filter label=scheduler=${SITE_LABEL}
     restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
