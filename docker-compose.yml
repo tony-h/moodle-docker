@@ -50,7 +50,7 @@ services:
       MOODLE_DATA_ROOT: /var/www/moodledata
 
       # Optional Moodle deployment settings (in seconds; 0 to disable)
-      MOODLE_CRON_KEEPALIVE: 15
+      MOODLE_CRON_KEEPALIVE: 0
     labels:
       - "ofelia.enabled=true"
       - "ofelia.job-exec.moodlecron.schedule=@every 1m"
