@@ -213,4 +213,62 @@ fi
 
 a2ensite 000-default.conf > /dev/null
 
+# ------------------------------------------------------------------
+# Moodle Configuration Management
+# ------------------------------------------------------------------
+# Some Moodle settings are stored in mdl_config instead of config.php.
+# These settings are managed using Moodle's supported CLI API rather
+# than direct database updates.
+
+set_moodle_config() {
+    local name="$1"
+    local value="$2"
+
+    # Skip if Moodle is not fully initialized yet.
+    if [ ! -f "/var/www/html/admin/cli/cfg.php" ]; then
+        return 0
+    fi
+
+    local current
+
+    current=$(
+        su -s /bin/bash www-data -c \
+        "php /var/www/html/admin/cli/cfg.php --name=${name} 2>/dev/null" \
+        || true
+    )
+
+    if [ "$current" != "$value" ]; then
+        echo "[+] Setting Moodle configuration: ${name}=${value}"
+
+        su -s /bin/bash www-data -c \
+        "php /var/www/html/admin/cli/cfg.php \
+        --name=${name} \
+        --set=${value}"
+    fi
+}
+
+# ------------------------------------------------------------------
+# Deployment Managed Moodle Settings
+# ------------------------------------------------------------------
+# These are optional deployment overrides.
+#
+# If an environment variable is undefined, Moodle retains whatever
+# value is stored in mdl_config and the setting remains manageable
+# through the web interface.
+#
+# Example:
+#   MOODLE_CRON_KEEPALIVE=0
+#
+# Moodle 4.2+ defaults cron_keepalive to 180 seconds. Setting it to
+# 0 restores traditional cron behaviour where each cron invocation
+# runs once and exits.
+
+if [ -n "${MOODLE_CRON_KEEPALIVE:-}" ]; then
+    set_moodle_config cron_keepalive "${MOODLE_CRON_KEEPALIVE}"
+fi
+
+# ------------------------------------------------------------------
+# Launch Supervisord
+# ------------------------------------------------------------------
+
 exec "$@"

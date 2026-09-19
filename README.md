@@ -59,16 +59,93 @@ To ensure data persistence and ease of troubleshooting, the following host direc
     docker compose up --build -d
     ```
 
+    To rebuild, use:
+    ```bash
+     docker compose build --no-cache moodle
+     docker compose down && docker compose up -d
+     ```
+
 ## Automated Configuration & Cron
 
-This stack uses `ofelia` to manage Moodle's cron tasks securely without exposing the Docker socket to all containers. The configuration is handled via labels on the `moodle` service:
+This stack uses Ofelia to manage Moodle's cron tasks securely without exposing cron management to the host operating system.
+
+The configuration is handled through labels on the Moodle service:
 
 * **Command:** `/usr/local/bin/php /var/www/html/admin/cli/cron.php`
-* **Interval:** Every 1 minute (`* * * * *`)
+* **Interval:** Every minute
 
-Additionally, the container's entrypoint script automatically detects the Redis container and injects the required `$CFG->session_handler_class` configurations directly into `config.php` upon startup.
+The container entrypoint automatically performs several Moodle configuration tasks during startup:
 
-Optionally, use the host `crontab` instead to eliminate the Ofelia sidecar entirely:
+* Detects Redis and injects the required session configuration into `config.php`.
+* Enables Moodle 5.x router support.
+* Configures reverse-proxy SSL handling.
+* Applies deployment-managed Moodle settings using Moodle's official `admin/cli/cfg.php` API.
+
+#### Cron Keepalive Optimization
+
+Moodle 4.2+ introduced a `cron_keepalive` setting that causes each cron execution to remain active for up to 180 seconds while polling for additional adhoc tasks.
+
+While useful for some deployments, it can generate excessive logging and multiple concurrent cron workers when combined with Ofelia's one-minute scheduling interval.
+
+This Docker image supports managing the setting through an optional environment variable:
+
+```yaml
+environment:
+  MOODLE_CRON_KEEPALIVE: 0
+```
+
+When defined, the container automatically applies the value using Moodle's supported CLI configuration API (`admin/cli/cfg.php`) during startup.
+
+For Ofelia-based deployments, the recommended setting is:
+
+```yaml
+MOODLE_CRON_KEEPALIVE: 0
+```
+
+This restores the traditional cron behavior:
+
+1. Cron starts.
+2. Scheduled tasks execute.
+3. Cron exits immediately.
+
+**Benefits:**
+
+- Dramatically reduced cron log volume.
+- Eliminates overlapping cron workers.
+- Lower resource consumption.
+- Maintains Moodle's recommended one-minute cron schedule.
+
+If `MOODLE_CRON_KEEPALIVE` is not defined, Moodle retains the value stored in `mdl_config`, allowing administrators to manage the setting through the Moodle web interface.
+
+**To verify:**
+
+```bash
+docker compose exec -u www-data moodle \
+  php admin/cli/cfg.php --name=cron_keepalive
+```
+
+Expected output:
+
+```text
+0
+```
+
+**Implementation Details**
+
+The container uses Moodle's official configuration API rather than direct database updates:
+
+```bash
+docker compose exec -u www-data moodle \
+    php admin/cli/cfg.php \
+    --name=cron_keepalive \
+    --set=0
+```
+
+This ensures compatibility with future Moodle upgrades while keeping deployment-specific settings reproducible across containers.
+
+### Alternative Host Cron
+
+If preferred, Ofelia can be removed entirely and cron can be scheduled directly from the host:
 
 ```bash
 * * * * * docker exec -u www-data <container_name> php /var/www/html/admin/cli/cron.php

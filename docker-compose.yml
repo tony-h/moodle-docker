@@ -2,7 +2,11 @@ services:
   db:
     image: mariadb:12.3
     restart: always
-    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW --skip-innodb-read-only-compressed
+    command: >
+      --transaction-isolation=READ-COMMITTED 
+      --binlog-format=ROW 
+      --character-set-server=utf8mb4 
+      --collation-server=utf8mb4_unicode_ci
     volumes:
       - ./db_data:/var/lib/mysql
     environment:
@@ -15,7 +19,7 @@ services:
     build:
       context: ./build-context
       dockerfile: Dockerfile
-    image: local/moodle-docker:latest
+    image: local/moodle-5x:latest
     container_name: ${SITE_LABEL}
     restart: always
     extra_hosts:
@@ -44,6 +48,9 @@ services:
       MOODLE_DB_PASSWORD: ${MYSQL_PASSWORD}
       MOODLE_WWW_ROOT: https://${DOMAIN}
       MOODLE_DATA_ROOT: /var/www/moodledata
+
+      # Optional Moodle deployment settings (in seconds; 0 to disable)
+      MOODLE_CRON_KEEPALIVE: 15
     labels:
       - "ofelia.enabled=true"
       - "ofelia.job-exec.moodlecron.schedule=@every 1m"
@@ -68,8 +75,8 @@ services:
     restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    logging: # Forces Docker to keep a maximum of 3 logs at 10MB each
-      driver: "json-file"
+    logging:
+      driver: "local"
       options:
         max-size: "10m"
         max-file: "3"
