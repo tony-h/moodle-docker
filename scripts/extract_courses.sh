@@ -3,7 +3,7 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# Ensure the script runs from the project root (where docker-compose.yml lives)
+# Ensure the script runs from the project root
 cd "$(dirname "$0")/.." || exit 1
 
 echo "Finding Moodle container..."
@@ -14,8 +14,11 @@ if [ -z "$CONTAINER_ID" ]; then
     exit 1
 fi
 
-echo "Ensuring correct permissions on the backups/courses folder..."
-docker exec --user root "$CONTAINER_ID" chown www-data:www-data /var/www/course-backups
+DEST_DIR="/var/www/cli-extracts"
+
+echo "Ensuring the extraction folder exists with correct permissions..."
+docker exec --user root "$CONTAINER_ID" mkdir -p "$DEST_DIR"
+docker exec --user root "$CONTAINER_ID" chown www-data:www-data "$DEST_DIR"
 
 echo "Fetching course IDs..."
 COURSE_IDS=$(docker exec --user www-data "$CONTAINER_ID" php -r "
@@ -28,19 +31,18 @@ COURSE_IDS=$(docker exec --user www-data "$CONTAINER_ID" php -r "
     }
 ")
 
-# Check if COURSE_IDS is empty (or just contains whitespace)
 if [ -z "${COURSE_IDS// /}" ]; then
-    echo "No courses found to backup (skipping site front page ID 1)."
+    echo "No courses found to extract (skipping site front page ID 1)."
     exit 0
 fi
 
 for id in $COURSE_IDS; do
     echo "----------------------------------------"
-    echo "Dumping course ID: $id..."
+    echo "Extracting course ID: $id..."
     docker exec --user www-data "$CONTAINER_ID" php /var/www/html/admin/cli/backup.php \
         --courseid="$id" \
-        --destination=/var/www/course-backups
+        --destination="$DEST_DIR"
 done
 
 echo "----------------------------------------"
-echo "Backup complete! Files are located in ./backups/courses/"
+echo "Extraction complete! Files are located in ./backups/cli-extracts/"
