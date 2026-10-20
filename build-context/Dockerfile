@@ -55,8 +55,8 @@ RUN a2enmod rewrite expires ssl && \
 
 # --- Moodle Core ---
 # Use ARG so these can be overridden in docker-compose.yml by end-users
-ARG MOODLE_BRANCH=502
-ARG MOODLE_RELEASE=502
+ARG MOODLE_BRANCH=503
+ARG MOODLE_RELEASE=503
 ENV MOODLE_BRANCH=${MOODLE_BRANCH}
 ENV MOODLE_RELEASE=${MOODLE_RELEASE}
 
