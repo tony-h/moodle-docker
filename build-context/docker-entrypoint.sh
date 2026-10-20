@@ -325,6 +325,23 @@ if [ -f "$CONFIG_PHP" ]; then
             "$CONFIG_PHP"
     fi
 
+    # Prevent executable paths from being changed through the Moodle Admin GUI.
+    #
+    # Match only an active PHP assignment at the beginning of a line.
+    # This avoids matching Moodle's commented example:
+    #
+    #   // $CFG->preventexecpath = true;
+    #
+    if ! grep -Eq \
+        '^[[:space:]]*\$CFG->preventexecpath[[:space:]]*=[[:space:]]*true[[:space:]]*;' \
+        "$CONFIG_PHP"; then
+
+        echo "[+] Enabling executable path protection in config.php..."
+
+        sed -i \
+            "/require_once.*setup\.php/i \$CFG->preventexecpath = true;" \
+            "$CONFIG_PHP"
+    fi
 
     # Stricter grep to avoid the commented // $CFG->session_redis_host line.
     if ! grep -q "session_redis_host = 'redis'" "$CONFIG_PHP"; then
@@ -688,6 +705,23 @@ configure_moodle_when_ready() {
 # Start the installer-aware configuration task in the background.
 configure_moodle_when_ready &
 
+# ------------------------------------------------------------------
+# Secure Moodle config.php Permissions
+# ------------------------------------------------------------------
+#
+# config.php contains database credentials and other sensitive
+# configuration. Allow the owner to read/write and the www-data group
+# to read it, while denying access to other users.
+# ------------------------------------------------------------------
+
+CONFIG_PHP="${MOODLE_ROOT}/config.php"
+
+if [ -f "$CONFIG_PHP" ]; then
+    chown root:www-data "$CONFIG_PHP"
+    chmod 0640 "$CONFIG_PHP"
+
+    echo "[+] Secured config.php permissions (root:www-data 0640)."
+fi
 
 # ------------------------------------------------------------------
 # Launch Supervisord / Container Command
