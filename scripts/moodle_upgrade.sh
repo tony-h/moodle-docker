@@ -114,7 +114,8 @@ docker compose exec -u www-data moodle php admin/cli/maintenance.php --disable
 echo "#"
 echo "# 9. Restarting the Moodle Stack for full refresh"
 echo "#"
-docker compose down && docker compose up -d
+docker compose down
+docker compose up -d
 
 echo "#############################################"
 echo "Upgrade Complete!"
