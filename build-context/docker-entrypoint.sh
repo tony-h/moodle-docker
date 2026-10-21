@@ -718,9 +718,9 @@ CONFIG_PHP="${MOODLE_ROOT}/config.php"
 
 if [ -f "$CONFIG_PHP" ]; then
     chown root:www-data "$CONFIG_PHP"
-    chmod 0640 "$CONFIG_PHP"
+    chmod 0440 "$CONFIG_PHP"
 
-    echo "[+] Secured config.php permissions (root:www-data 0640)."
+    echo "[+] Secured config.php permissions (root:www-data 0440)."
 fi
 
 # ------------------------------------------------------------------

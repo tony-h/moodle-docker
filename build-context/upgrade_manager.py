@@ -154,8 +154,8 @@ def main():
     
     # 5. Fix ownership and permissions
     log("Setting permissions...")
-    subprocess.run(["chown", "-R", "www-data:www-data", LIVE_DIR])
-    subprocess.run(["chmod", "0640", os.path.join(LIVE_DIR, 'config.php')])
+    subprocess.run(["chown", "-R", "root:www-data", LIVE_DIR])
+    subprocess.run(["chmod", "0440", os.path.join(LIVE_DIR, 'config.php')])
     
     # Cleanup 
     shutil.rmtree(vanilla_old_dir)
