@@ -36,6 +36,17 @@ services:
     image: local/moodle-503:latest
     container_name: ${SITE_LABEL}
     restart: always
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          su -s /bin/bash www-data -c
+          '/usr/local/bin/php /var/www/html/admin/cli/upgrade.php --is-pending'
+          >/dev/null 2>&1
+      start_period: 30s
+      interval: 10s
+      timeout: 10s
+      retries: 30
     depends_on:
       db:
         condition: service_healthy
@@ -62,8 +73,27 @@ services:
       MOODLE_WWW_ROOT: https://${DOMAIN}
       MOODLE_DATA_ROOT: /var/www/moodledata
 
-      # Optional Moodle deployment settings (in seconds; 0 to disable)
-      MOODLE_CRON_KEEPALIVE: 0
+      # Automated Moodle installation.
+      MOODLE_AUTO_INSTALL: "true"
+      MOODLE_LANG: en
+
+      # Moodle site information.
+      MOODLE_SITE_FULLNAME: ${MOODLE_SITE_FULLNAME}
+      MOODLE_SITE_SHORTNAME: ${MOODLE_SITE_SHORTNAME}
+      MOODLE_SITE_SUMMARY: ${MOODLE_SITE_SUMMARY}
+
+      # Moodle administrator credentials.
+      MOODLE_ADMIN_USER: ${MOODLE_ADMIN_USER}
+      MOODLE_ADMIN_PASSWORD: ${MOODLE_ADMIN_PASSWORD}
+      MOODLE_ADMIN_EMAIL: ${MOODLE_ADMIN_EMAIL}
+
+      # Moodle email settings.
+      MOODLE_SUPPORT_EMAIL: ${MOODLE_ADMIN_EMAIL}
+      MOODLE_NOREPLY_EMAIL: ${MOODLE_NOREPLY_EMAIL}
+
+      # Optional Moodle deployment settings.
+      MOODLE_CRON_KEEPALIVE: "0"
+
     labels:
       - "ofelia.enabled=true"
       - "scheduler=${SITE_LABEL}"
@@ -84,7 +114,8 @@ services:
     image: mcuadros/ofelia:latest
     container_name: ${SITE_LABEL}-ofelia
     depends_on:
-      - moodle
+      moodle:
+        condition: service_healthy
     command: >
       daemon
       --docker

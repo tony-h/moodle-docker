@@ -344,7 +344,10 @@ if [ -f "$CONFIG_PHP" ]; then
     fi
 
     # Stricter grep to avoid the commented // $CFG->session_redis_host line.
-    if ! grep -q "session_redis_host = 'redis'" "$CONFIG_PHP"; then
+    # Configure Redis-backed Moodle sessions.
+    if ! grep -Eq \
+        '^[[:space:]]*\$CFG->session_handler_class[[:space:]]*=' \
+        "$CONFIG_PHP"; then
 
         echo "[+] Injecting Redis session configuration into config.php..."
 
@@ -359,6 +362,22 @@ if [ -f "$CONFIG_PHP" ]; then
         sed -i \
             "/require_once.*setup\.php/i \$CFG->session_redis_port = 6379;" \
             "$CONFIG_PHP"
+
+        sed -i \
+            "/require_once.*setup\.php/i \$CFG->session_redis_database = 1;" \
+            "$CONFIG_PHP"
+
+        sed -i \
+            "/require_once.*setup\.php/i \$CFG->session_redis_prefix = 'moodle_session_';" \
+            "$CONFIG_PHP"
+
+        sed -i \
+            "/require_once.*setup\.php/i \$CFG->session_redis_acquire_lock_timeout = 10;" \
+            "$CONFIG_PHP"
+
+        sed -i \
+            "/require_once.*setup\.php/i \$CFG->session_redis_lock_expire = 120;" \
+            "$CONFIG_PHP"
     fi
 
 fi
@@ -367,18 +386,25 @@ a2ensite 000-default.conf > /dev/null
 
 
 # ------------------------------------------------------------------
-# Deployment-Managed Moodle Defaults
+# Moodle Installation and Deployment Defaults
 # ------------------------------------------------------------------
 #
-# Some Moodle settings live in the database rather than config.php.
-# These settings cannot be applied until Moodle has been completely
-# installed.
+# Automatic installation mode:
 #
-# On a new installation this background task waits until an administrator
-# has actually accessed Moodle. It then applies the deployment defaults.
+#   1. Detect an empty Moodle database.
+#   2. Install Moodle through install_database.php.
+#   3. Apply deployment-managed defaults synchronously.
+#   4. Start Supervisord only after configuration succeeds.
 #
-# On an existing installation the check normally succeeds immediately
-# and the defaults are applied at container startup.
+# Manual installation mode:
+#
+#   1. Start the web server.
+#   2. Wait in the background for the web installation to complete.
+#   3. Apply deployment-managed defaults after Moodle settles.
+#
+# Existing installations:
+#
+#   Apply deployment-managed defaults synchronously at startup.
 #
 # To add additional deployment defaults later, add them to the PHP block
 # in apply_moodle_defaults().
@@ -388,18 +414,17 @@ MOODLE_ROOT="${MOODLE_ROOT:-/var/www/html}"
 
 
 # ------------------------------------------------------------------
-# Determine Whether Moodle Installation Is Complete
+# Determine Whether Moodle's Database Is Installed
 # ------------------------------------------------------------------
 #
-# config.php and the database schema are created before Moodle's web
-# installation process is completely finished. Their existence alone
-# therefore does not indicate that deployment configuration should run.
+# This is used by automatic installation mode. It verifies that Moodle
+# can bootstrap and that the core database version exists.
 #
-# We consider Moodle ready once a site administrator has actually
-# accessed the installed site.
+# This check deliberately does not require administrator lastaccess.
+# A CLI-installed administrator has not necessarily logged in yet.
 # ------------------------------------------------------------------
 
-moodle_is_installed() {
+moodle_database_is_installed() {
 
     [ -f "${MOODLE_ROOT}/config.php" ] || return 1
 
@@ -409,24 +434,162 @@ moodle_is_installed() {
 
 define('CLI_SCRIPT', true);
 
-require('${MOODLE_ROOT}/config.php');
+try {
+    require('${MOODLE_ROOT}/config.php');
 
-\$admins = get_admins();
+    \$version = get_config('core', 'version');
 
-if (empty(\$admins)) {
+    exit(empty(\$version) ? 1 : 0);
+
+} catch (Throwable \$exception) {
     exit(1);
 }
+EOPHP
+}
 
-foreach (\$admins as \$admin) {
-    if (!empty(\$admin->lastaccess)) {
-        exit(0);
+
+# ------------------------------------------------------------------
+# Determine Whether Web Installation Is Complete
+# ------------------------------------------------------------------
+#
+# This is used only by manual web-installation mode. It waits until an
+# administrator has accessed the site.
+# ------------------------------------------------------------------
+
+moodle_web_installation_is_complete() {
+
+    [ -f "${MOODLE_ROOT}/config.php" ] || return 1
+
+    su -s /bin/bash www-data -c "/usr/local/bin/php" \
+        >/dev/null 2>&1 <<EOPHP
+<?php
+
+define('CLI_SCRIPT', true);
+
+try {
+    require('${MOODLE_ROOT}/config.php');
+
+    \$admins = get_admins();
+
+    if (empty(\$admins)) {
+        exit(1);
     }
+
+    foreach (\$admins as \$admin) {
+        if (!empty(\$admin->lastaccess)) {
+            exit(0);
+        }
+    }
+
+} catch (Throwable \$exception) {
+    exit(1);
 }
 
 exit(1);
 EOPHP
 }
 
+moodle_upgrade_is_complete() {
+    su -s /bin/bash www-data -c \
+        "/usr/local/bin/php \
+            '${MOODLE_ROOT}/admin/cli/upgrade.php' \
+            --is-pending" \
+        >/dev/null 2>&1
+}
+
+# ------------------------------------------------------------------
+# Validate Automatic Installation Environment
+# ------------------------------------------------------------------
+
+validate_auto_install_environment() {
+
+    local required_variables=(
+        MOODLE_SITE_FULLNAME
+        MOODLE_SITE_SHORTNAME
+        MOODLE_ADMIN_USER
+        MOODLE_ADMIN_PASSWORD
+        MOODLE_ADMIN_EMAIL
+        MOODLE_SUPPORT_EMAIL
+        MOODLE_NOREPLY_EMAIL
+    )
+
+    local variable
+    local missing=0
+
+    for variable in "${required_variables[@]}"; do
+        if [ -z "${!variable:-}" ]; then
+            echo >&2 \
+                "[!] Automatic installation requires ${variable}."
+            missing=1
+        fi
+    done
+
+    if [ "$missing" -ne 0 ]; then
+        return 1
+    fi
+}
+
+
+# ------------------------------------------------------------------
+# Install Moodle from Environment Variables
+# ------------------------------------------------------------------
+#
+# config.php is already generated earlier in this entrypoint, so use
+# Moodle's install_database.php command to initialize the empty database.
+#
+# The command is executed as www-data so files generated in moodledata
+# receive the same ownership used by Apache and Moodle CLI operations.
+# ------------------------------------------------------------------
+
+install_moodle_from_environment() {
+
+    validate_auto_install_environment || {
+        echo >&2 \
+            "[!] Automatic Moodle installation configuration is incomplete."
+
+        return 1
+    }
+
+    local language="${MOODLE_LANG:-en}"
+    local summary="${MOODLE_SITE_SUMMARY:-}"
+
+    local install_command=(
+        /usr/local/bin/php
+        "${MOODLE_ROOT}/admin/cli/install_database.php"
+        "--lang=${language}"
+        "--adminuser=${MOODLE_ADMIN_USER}"
+        "--adminpass=${MOODLE_ADMIN_PASSWORD}"
+        "--adminemail=${MOODLE_ADMIN_EMAIL}"
+        "--fullname=${MOODLE_SITE_FULLNAME}"
+        "--shortname=${MOODLE_SITE_SHORTNAME}"
+        "--summary=${summary}"
+        "--supportemail=${MOODLE_SUPPORT_EMAIL}"
+        "--noreplyemail=${MOODLE_NOREPLY_EMAIL}"
+        --agree-license
+    )
+
+    local quoted_command
+
+    printf -v quoted_command '%q ' "${install_command[@]}"
+
+    echo "[+] Empty Moodle database detected."
+    echo "[+] Starting automatic Moodle CLI installation..."
+
+    if ! su -s /bin/bash www-data -c "$quoted_command"; then
+        echo >&2 "[!] Automatic Moodle CLI installation failed."
+
+        return 1
+    fi
+
+    if ! moodle_database_is_installed; then
+        echo >&2 \
+            "[!] Moodle installer exited, but installation could not be verified."
+
+        return 1
+    fi
+
+    echo "[+] Automatic Moodle CLI installation completed successfully."
+}
 
 # ------------------------------------------------------------------
 # Apply Deployment-Managed Moodle Defaults
@@ -548,104 +711,80 @@ set_config(
 
 echo "[+] Set Redis cache test server to {$redisserver}.\n";
 
-try {
+$writer = cache_config_writer::instance();
+$stores = $writer->get_all_stores();
 
-    $writer = cache_config_writer::instance();
-    $stores = $writer->get_all_stores();
+if (!array_key_exists('redis', $stores)) {
 
-    if (!array_key_exists('redis', $stores)) {
-
-        $writer->add_store_instance(
-            'redis',
-            'redis',
-            [
-                'server' => $redisserver,
-                'prefix' => 'moodle_',
-            ]
-        );
-
-        echo "[+] Created Redis MUC cache store.\n";
-
-    } else {
-
-        echo "[+] Redis MUC cache store already exists.\n";
-    }
-
-    $writer->set_mode_mappings([
-        cache_store::MODE_APPLICATION => ['redis'],
-        cache_store::MODE_SESSION     => ['redis'],
-        cache_store::MODE_REQUEST     => ['default_request'],
-    ]);
-
-    echo "[+] Configured Redis MUC cache mappings.\n";
-
-} catch (Throwable $exception) {
-
-    fwrite(
-        STDERR,
-        "[!] Redis MUC configuration failed: " .
-        $exception->getMessage() .
-        "\n"
+    $writer->add_store_instance(
+        'redis',
+        'redis',
+        [
+            'server' => $redisserver,
+            'prefix' => 'moodle_',
+        ]
     );
+
+    echo "[+] Created Redis MUC cache store.\n";
+
+} else {
+
+    echo "[+] Redis MUC cache store already exists.\n";
 }
+
+$writer->set_mode_mappings([
+    cache_store::MODE_APPLICATION => ['redis'],
+    cache_store::MODE_SESSION     => ['redis'],
+    cache_store::MODE_REQUEST     => ['default_request'],
+]);
+
+echo "[+] Configured Redis MUC cache mappings.\n";
 
 // ------------------------------------------------------------------
 // Unoconv File Converter
 // ------------------------------------------------------------------
 
-try {
+$unoconvpath = '/usr/bin/unoconv';
 
-    $unoconvpath = '/usr/bin/unoconv';
+if (
+    !is_file($unoconvpath) ||
+    !is_executable($unoconvpath)
+) {
+    throw new RuntimeException(
+        "Unoconv is not available at {$unoconvpath}."
+    );
+}
 
-    if (
-        !is_file($unoconvpath) ||
-        !is_executable($unoconvpath)
-    ) {
-        throw new RuntimeException(
-            "Unoconv is not available at {$unoconvpath}."
-        );
-    }
+set_config(
+    'pathtounoconv',
+    $unoconvpath,
+    'fileconverter_unoconv'
+);
+
+$pluginmanager = core_plugin_manager::instance();
+
+$plugininfo = $pluginmanager->get_plugin_info(
+    'fileconverter_unoconv'
+);
+
+if ($plugininfo) {
+
+    $plugininfo->set_enabled(true);
+
+    echo "[+] Enabled Unoconv using {$unoconvpath}.\n";
+
+} else {
+
+    # Fallback if Moodle's plugin manager does not return the
+    # fileconverter_unoconv component.
 
     set_config(
-        'pathtounoconv',
-        $unoconvpath,
+        'disabled',
+        '0',
         'fileconverter_unoconv'
     );
 
-    $pluginmanager = core_plugin_manager::instance();
-
-    $plugininfo = $pluginmanager->get_plugin_info(
-        'fileconverter_unoconv'
-    );
-
-    if ($plugininfo) {
-
-        $plugininfo->set_enabled(true);
-
-        echo "[+] Enabled Unoconv using {$unoconvpath}.\n";
-
-    } else {
-
-        # Fallback if Moodle's plugin manager does not return the
-        # fileconverter_unoconv component.
-
-        set_config(
-            'disabled',
-            '0',
-            'fileconverter_unoconv'
-        );
-
-        echo "[+] Enabled Unoconv using configuration fallback.\n";
-    }
-
-} catch (Throwable $exception) {
-
-    fwrite(
-        STDERR,
-        "[!] Unoconv configuration failed: " .
-        $exception->getMessage() .
-        "\n"
-    );
+    echo "[+] Enabled Unoconv using configuration fallback.\n";
 }
 
 
@@ -664,7 +803,24 @@ EOPHP
 
 
 # ------------------------------------------------------------------
-# Wait for Moodle Installation
+# Apply Deployment Defaults and Report Failure
+# ------------------------------------------------------------------
+
+apply_moodle_defaults_or_fail() {
+
+    if apply_moodle_defaults; then
+        echo "[+] Moodle deployment defaults configured."
+        return 0
+    fi
+
+    echo >&2         "[!] Moodle deployment defaults could not be fully configured."
+
+    return 1
+}
+
+
+# ------------------------------------------------------------------
+# Manual Web-Installation Completion
 # ------------------------------------------------------------------
 #
 # This process runs in the background because Apache/Supervisord must
@@ -686,32 +842,102 @@ EOPHP
 
 configure_moodle_when_ready() {
 
-    echo "[+] Waiting for Moodle installation to complete..."
+    echo "[+] Waiting for manual Moodle web installation to complete..."
 
-    until moodle_is_installed; do
+    until \
+        moodle_web_installation_is_complete &&
+        moodle_upgrade_is_complete; do
+
         sleep 5
     done
 
-    echo "[+] Moodle installation complete."
+    echo "[+] Moodle web installation and upgrade processing complete."
 
-    if apply_moodle_defaults; then
-        echo "[+] Moodle deployment defaults configured."
-    else
-        echo >&2 "[!] Moodle deployment defaults could not be fully configured."
+    # Allow the final web-installer request to finish cache processing.
+    sleep 30
+
+    if ! apply_moodle_defaults_or_fail; then
+        echo >&2 \
+            "[!] Manual web installation completed, but deployment defaults failed."
     fi
 }
 
 
-# Start the installer-aware configuration task in the background.
-configure_moodle_when_ready &
+# ------------------------------------------------------------------
+# Install or Configure Moodle
+# ------------------------------------------------------------------
+
+MOODLE_AUTO_INSTALL_NORMALIZED="$(
+    printf '%s' "${MOODLE_AUTO_INSTALL:-false}" |
+    tr '[:upper:]' '[:lower:]'
+)"
+
+case "$MOODLE_AUTO_INSTALL_NORMALIZED" in
+
+    true|yes|1)
+
+        if moodle_database_is_installed; then
+            echo "[+] Existing Moodle database installation detected."
+        else
+            install_moodle_from_environment
+        fi
+
+        # In automatic mode the CLI installer has now returned, so it is
+        # safe to apply Redis MUC, Unoconv, and other managed defaults
+        # synchronously before Apache and Ofelia begin normal operation.
+        apply_moodle_defaults_or_fail
+        ;;
+
+    false|no|0|"")
+
+        if moodle_database_is_installed; then
+            echo "[+] Existing Moodle database installation detected."
+            apply_moodle_defaults_or_fail
+        else
+            # Apache must start so the manual web installer is available.
+            configure_moodle_when_ready &
+        fi
+        ;;
+
+    *)
+
+        echo >&2 \
+            "[!] Invalid MOODLE_AUTO_INSTALL value: ${MOODLE_AUTO_INSTALL:-}"
+
+        echo >&2 \
+            "[!] Use true, false, yes, no, 1, or 0."
+
+        exit 1
+        ;;
+
+esac
+
+
+# ------------------------------------------------------------------
+# Remove Installation-Only Environment Variables
+# ------------------------------------------------------------------
+#
+# These values are no longer needed after automatic installation.
+# Remove them before launching long-running processes.
+# ------------------------------------------------------------------
+
+unset MOODLE_ADMIN_PASSWORD
+unset MOODLE_ADMIN_USER
+unset MOODLE_ADMIN_EMAIL
+unset MOODLE_SUPPORT_EMAIL
+unset MOODLE_NOREPLY_EMAIL
+unset MOODLE_SITE_FULLNAME
+unset MOODLE_SITE_SHORTNAME
+unset MOODLE_SITE_SUMMARY
+unset MOODLE_LANG
 
 # ------------------------------------------------------------------
 # Secure Moodle config.php Permissions
 # ------------------------------------------------------------------
 #
 # config.php contains database credentials and other sensitive
-# configuration. Allow the owner to read/write and the www-data group
-# to read it, while denying access to other users.
+# configuration. Allow root and the www-data group to read it while
+# denying write access and access by other users.
 # ------------------------------------------------------------------
 
 CONFIG_PHP="${MOODLE_ROOT}/config.php"
