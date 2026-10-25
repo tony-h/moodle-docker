@@ -33,7 +33,7 @@ services:
     build:
       context: ./build-context
       dockerfile: Dockerfile
-    image: local/moodle-5x:latest
+    image: local/moodle-503:latest
     container_name: ${SITE_LABEL}
     restart: always
     depends_on:
