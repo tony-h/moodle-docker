@@ -1,0 +1,19 @@
+services:
+  moodle:
+    environment:
+      MOODLE_AUTO_INSTALL: "true"
+      MOODLE_LANG: ${MOODLE_LANG:-en}
+
+      # Moodle site information.
+      MOODLE_SITE_FULLNAME: ${MOODLE_SITE_FULLNAME}
+      MOODLE_SITE_SHORTNAME: ${MOODLE_SITE_SHORTNAME}
+      MOODLE_SITE_SUMMARY: ${MOODLE_SITE_SUMMARY}
+
+      # Moodle administrator credentials.
+      MOODLE_ADMIN_USER: ${MOODLE_ADMIN_USER}
+      MOODLE_ADMIN_PASSWORD: ${MOODLE_ADMIN_PASSWORD}
+      MOODLE_ADMIN_EMAIL: ${MOODLE_ADMIN_EMAIL}
+
+      # Moodle email settings.
+      MOODLE_SUPPORT_EMAIL: ${MOODLE_SUPPORT_EMAIL}
+      MOODLE_NOREPLY_EMAIL: ${MOODLE_NOREPLY_EMAIL}

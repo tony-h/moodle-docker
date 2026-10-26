@@ -1,5 +1,5 @@
 # Configs and logs
-.env
+.env*
 *backup*
 logs
 supervisor
